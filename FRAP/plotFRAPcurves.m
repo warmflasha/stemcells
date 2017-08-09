@@ -1,34 +1,78 @@
 function plotFRAPcurves(dataDir, oibfile, results)
 
-    tracesnorm = results.tracesnorm;
-    tcut = size(tracesnorm,2);
-    Nfrapped = size(tracesnorm,1);
+    tracesNuc = results.tracesNuc;
+    tracesNucNorm = results.tracesNucNorm;
+
+    tcut = size(tracesNucNorm,2);
+    Nfrapped = size(tracesNucNorm,1);
     tres = results.tres;
-    
-    tres
+    colors = hsv(Nfrapped);
+
     % filename
     [~,barefname,~] = fileparts(oibfile);
     barefname = strrep(barefname,'.','dot');
 
-    % FRAP curves
+    % FRAP curves raw nuclear
     figure,
-    t = repmat((1:tcut)*tres,[Nfrapped 1]);
-    plot(t' ,tracesnorm');
+    hold on
+    t = (1:tcut)*tres;
+    legendstrs = {};
+    for i = 1:Nfrapped
+        legendstrs = [legendstrs num2str(i)];
+        plot(t' ,tracesNuc(i,:)','Color',colors(i,:),'LineWidth',1.5);
+    end
+    hold off
     xlabel('time (sec)');
     ylabel('intensity')
-    saveas(gcf,fullfile(dataDir, ['FRAPcurvesRaw_' barefname]));
-    saveas(gcf,fullfile(dataDir, ['FRAPcurvesRaw_' barefname '.png']));
-
-    plot(t' ,tracesnorm');
+    xlim([0 tcut*tres]);
+    legend(legendstrs);
+    saveas(gcf,fullfile(dataDir, [barefname '_FRAPcurvesNucRaw']));
+    saveas(gcf,fullfile(dataDir, [barefname '_FRAPcurvesNucRaw'  '.png']));
+    close;
+    
+    % FRAP curves raw cytoplasmic
+    if isfield(results,'tracesCyt')
+        figure,
+        hold on
+        for i = 1:Nfrapped
+            plot(t' ,results.tracesCyt(i,:)','Color',colors(i,:),'LineWidth',1.5);
+        end
+        hold off
+        xlabel('time (sec)');
+        ylabel('intensity')
+        xlim([0 tcut*tres]);
+        legend(legendstrs);
+        saveas(gcf,fullfile(dataDir, [barefname '_FRAPcurvesCytRaw']));
+        saveas(gcf,fullfile(dataDir, [barefname '_FRAPcurvesCytRaw'  '.png']));
+        close;
+    end
+    
+    % FRAP curves normalized
+    clf
+    hold on
+    for i = 1:Nfrapped
+        plot(t' ,tracesNucNorm(i,:)','Color',colors(i,:),'LineWidth',1.5);
+    end
+    hold off
     xlabel('time (sec)');
     ylabel('normalized intensity')
-    saveas(gcf,fullfile(dataDir, ['FRAPcurvesNorm_' barefname]));
-    saveas(gcf,fullfile(dataDir, ['FRAPcurvesNorm_' barefname '.png']));
-    close;
-
-    % FRAP fit
-    visualizeFRAPfit(results)
-    saveas(gcf,fullfile(dataDir, ['FRAPfit_' barefname]));
-    saveas(gcf,fullfile(dataDir, ['FRAPfit_' barefname '.png']));
-    close;
+    xlim([0 tcut*tres]);
+    legend(legendstrs);
+    saveas(gcf,fullfile(dataDir, [barefname '_FRAPcurvesNucNorm']));
+    saveas(gcf,fullfile(dataDir, [barefname '_FRAPcurvesNucNorm.png']));
+    
+    if isfield(results,'tracesCyt')
+        clf
+        hold on
+        for i = 1:Nfrapped
+            plot(t' ,results.tracesCytNorm(i,:)','Color',colors(i,:),'LineWidth',1.5);
+        end
+        hold off
+        xlabel('time (sec)');
+        ylabel('normalized intensity')
+        xlim([0 tcut*tres]);
+        legend(legendstrs);
+        saveas(gcf,fullfile(dataDir, [barefname '_FRAPcurvesCytNorm']));
+        saveas(gcf,fullfile(dataDir, [barefname '_FRAPcurvesCytNorm.png']));
+    end
 end

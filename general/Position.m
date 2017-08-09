@@ -125,23 +125,24 @@ classdef Position < handle
                     img(:,:,cii) = imread(fname, channels(cii));
                 end
                 
-                if exist('time','var') && time > 1
+                if exist('time','var') || time > 1
                     error('todo : include reading for dynamic not Andor or epi');
                 end
                 
-            elseif strcmp(ext,'.vsi') || strcmp(ext, '.oif')
+            elseif strcmp(ext,'.vsi') || strcmp(ext, '.oif') || strcmp(ext, '.oib')
                 
                 r = bfGetReader(fname);
-                img = zeros([r.getSizeY() r.getSizeX() numel(channels) r.getSizeZ()], 'uint16');
-                for cii = 1:numel(channels)
-                    for zi = 1:r.getSizeZ()
-                        img(:,:,cii,zi) = bfGetPlane(r, r.getIndex(zi-1,channels(cii)-1,time-1)+1);
+                img = zeros([r.getSizeY() r.getSizeX() numel(channels) r.getSizeZ() numel(time)], 'uint16');
+                for ti = 1%:numel(time)
+                    for cii = 1:numel(channels)
+                        for zi = 1:r.getSizeZ()
+                            img(:,:,cii,zi,ti) = bfGetPlane(r, r.getIndex(zi-1,channels(cii)-1,time(ti)-1)+1);
+                        end
                     end
                 end
                 r.close();
                 img = squeeze(img);
             end
-            
             %disp(['loaded image ' fname]);
         end
 
@@ -230,7 +231,7 @@ classdef Position < handle
                 while(isempty(listing))
                     i = i+1;
                     if i > numel(barefname)
-                        error(['segmentation ' [barefname '*h5'] ' for channel ' num2str(channel) ' not found in ' dataDir]);
+                        error(['segmentation for ' this.filename ' for channel ' num2str(channel) ' not found in ' dataDir]);
                     else
                         listing = dir(fullfile(dataDir,[barefname{i} '*h5']));    
                     end
@@ -337,7 +338,7 @@ classdef Position < handle
             
             %disp(['loaded MIPidx ' fname]);
         end
-        
+
         % process data
         %---------------------------------
 
@@ -421,7 +422,7 @@ classdef Position < handle
             allChannels = unique([nucChannel opts.dataChannels]);
 
             % for the purpose of the current background subtraction
-            if isfield(opts, 'fgChannel');
+            if isfield(opts, 'fgChannel')
                 allChannels = unique([allChannels opts.fgChannel]);
             else
                 bgmask = [];
@@ -445,6 +446,13 @@ classdef Position < handle
                 error('nuclear segmentation missing');
             end
 
+            % make it more efficient to deal with e.g. oib
+            [~,~,ext] = fileparts(this.filename);
+            if strcmp(ext,'.oib')
+                disp('.oib: loading all data at once for speed');
+                imgdata = readStack2(fullfile(dataDir, this.filename), [], opts.tMax);
+            end
+            
             for ti = 1:opts.tMax
 
                 % progress indicator
@@ -460,7 +468,9 @@ classdef Position < handle
                     bgmask = imerode(~fgmask,strel('disk', opts.bgMargin));
                     fgmask = imerode(fgmask,strel('disk', opts.bgMargin));
                 else
-                    warning('not using background mask');
+                    if ti == 1
+                        warning('not using background mask');
+                    end
                 end
                 
                 % make clean nuclear mask
@@ -470,7 +480,7 @@ classdef Position < handle
                 %nucmaskraw(bgmask) = false;
                 if ~isfield(opts, 'nuclearSegmentation') && ~isfield(opts, 'dirtyOptions') 
                     
-                    disp('using nuclearCleanup');
+                    if ti == 1, disp('using nuclearCleanup'); end
                     nucmask = nuclearCleanup(nucmaskraw, opts.cleanupOptions);
                     
                 elseif isfield(opts, 'nuclearSegmentation')
@@ -481,8 +491,27 @@ classdef Position < handle
                     
                     disp('using dirty nuclear segmentation');
                     opts.dirtyOptions.mask = nucmaskraw;
-                    imc = this.loadImage(dataDir, nucChannel, ti);
+                    if strcmp(ext,'oib')
+                        imc = squeeze(imgdata(:,:,nucChannel,:,ti));
+                    else
+                        imc = this.loadImage(dataDir, nucChannel, ti);
+                    end
                     nucmask = dirtyNuclearSegmentation(imc, opts.dirtyOptions);
+                end
+                
+                % save clean nuclear mask
+                if isfield(opts,'saveCleanNucMask') && opts.saveCleanNucMask
+                    
+                    segfname = [this.bareFilename '_seg.tif'];
+                    segrawfname = [this.bareFilename '_segRaw.tif'];
+                    
+                    if ti == 1
+                        imwrite(nucmask,fullfile(dataDir, segfname),'Compression','none');
+                        imwrite(nucmaskraw,fullfile(dataDir, segrawfname),'Compression','none');
+                    else
+                        imwrite(nucmask,fullfile(dataDir, segfname),'WriteMode','append','Compression','none');
+                        imwrite(nucmaskraw,fullfile(dataDir, segrawfname),'WriteMode','append','Compression','none');
+                    end
                 end
                 
                 % make cytoplasmic mask 
@@ -559,6 +588,7 @@ classdef Position < handle
                 this.cellData(ti).XY = centroids;
                 this.cellData(ti).area = areas;
                 this.cellData(ti).nucLevel = zeros([nCells numel(opts.dataChannels)]);
+                this.cellData(ti).nucZ = zeros([nCells 1]);
                 this.cellData(ti).nucLevelAvg = zeros([1 numel(opts.dataChannels)]);
                 this.cellData(ti).nucLevelStd = zeros([1 numel(opts.dataChannels)]);
                 this.cellData(ti).background = zeros([1 numel(opts.dataChannels)]);
@@ -596,7 +626,11 @@ classdef Position < handle
                 for cii = 1:numel(opts.dataChannels)
                     
                     %disp(['loading channel ' num2str(opts.dataChannels(cii))]);
-                    imc = this.loadImage(dataDir, opts.dataChannels(cii), ti);
+                    if strcmp(ext,'.oib')
+                        imc = squeeze(imgdata(:,:,opts.dataChannels(cii),:,ti));
+                    else
+                        imc = this.loadImage(dataDir, opts.dataChannels(cii), ti);
+                    end
                     %disp(['size: ' num2str(size(imc))]);
                     
                     if size(nucmask) ~= [size(imc,1) size(imc,2)]
@@ -648,6 +682,7 @@ classdef Position < handle
                         nucPixIdx = nucCC.PixelIdxList{cellidx};
                         nucPixIdx = double(zi-1)*size(imc,1)*size(imc,2) + nucPixIdx;
                         this.cellData(ti).nucLevel(cellidx, cii) = mean(imc(nucPixIdx));
+                        this.cellData(ti).nucZ(cellidx) = zi;
                         
                         if opts.cytoplasmicLevels
                             cytPixIdx = cytCC.PixelIdxList{cellidx};
@@ -682,7 +717,7 @@ classdef Position < handle
                 end
             end
             fprintf('\n');
-            debugInfo = struct('bgmask', bgmask, 'nucmask', nucmask, 'cytCC', {cytCC});
+            debugInfo = struct('bgmask', bgmask, 'nucmaskraw', nucmaskraw, 'nucmask', nucmask, 'cytCC', {cytCC},'segall',{seg});
         end
         
         function makeTimeTraces(this)
@@ -730,6 +765,63 @@ classdef Position < handle
             this.timeTraces.cytLevelMed = cytLevelMed;
             
             this.timeTraces.background = bg;
+        end
+        
+        function makeTracks(this, minlength)
+            % makeTracks(minlength)
+            %
+            % minlength : minimal length of tracks kept (in frames)
+            
+            if ~exist('minlength','var')
+                minlength = 10;
+            end
+            
+            points = {this.cellData.XY};
+            
+            all_Icyt = cat(1, this.cellData.cytLevel);
+            all_Inuc = cat(1, this.cellData.nucLevel);
+            all_points = cat(1, points{:});
+            
+            % empty time points crash the tracker but this prevents it
+            emptyTimes = cellfun(@isempty, points);
+            for i = find(emptyTimes)
+                points{i} = [NaN NaN];
+            end
+            
+            max_linking_distance = 4;
+            max_gap_closing = Inf;
+            debug = true;
+
+            [tracks, adjacency_tracks] = simpletracker(points,...
+                'MaxLinkingDistance', max_linking_distance, ...
+                'MaxGapClosing', max_gap_closing, ...
+                'Debug', debug);
+            
+            good = [];
+            cyttraces = {};
+            nuctraces = {};
+            trackXY = {};
+            trackT = {};
+            
+            for i = 1:numel(tracks)
+                if sum(~isnan(tracks{i})) > minlength
+
+                    good = [good i];
+                    track = adjacency_tracks{i};
+                    
+                    j = numel(good);
+                    nuctraces{j} = all_Inuc(track,:);
+                    cyttraces{j} = all_Icyt(track,:);
+                    trackXY{j} = all_points(track, :);
+                    
+                    trackT{j} = find(~isnan(tracks{i}));
+                end
+            end
+
+            this.timeTraces.cytLevel = cyttraces;
+            this.timeTraces.nucLevel = nuctraces;
+            this.timeTraces.trackXY = trackXY;
+            this.timeTraces.trackT = trackT;
         end
         
         % getter for dependent properties
