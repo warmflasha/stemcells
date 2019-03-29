@@ -1,8 +1,8 @@
 clear all; close all;
 
-addpath(genpath('/Users/idse/repos/Warmflash/stemcells')); 
+%addpath(genpath('/Users/idse/repos/Warmflash Lab/0_adaptivedraft')); 
 
-dataDir = '/Users/idse/data_tmp/0_kinetics/';
+dataDir = '~/Dropbox/Warmflash Lab/idse/0_adaptivedraft';
 
 FRAPdirs = {'170209_FRAP','170302_FRAPagain','170510_FRAPafterA',...
             '170519_FRAPctrl','170524_FRAP','170525_FRAP','170529_FRAPAvB',...
