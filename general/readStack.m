@@ -1,4 +1,4 @@
-function [data meta] = readStack(fullfname) 
+function [img, meta] = readStack(fullfname) 
     % read the data from a single multichannel stack
 
     % load the Bio-Formats library into the MATLAB environment
@@ -18,7 +18,7 @@ function [data meta] = readStack(fullfname)
     imclass = class(bfGetPlane(r, 1));
     
     stackSize = [r.getSizeY(), r.getSizeX(), r.getSizeZ(), r.getSizeC(), r.getSizeT()];
-    data = zeros(stackSize, imclass);
+    img = zeros(stackSize, imclass);
     
     for i = 1:r.getImageCount()
 
@@ -29,7 +29,7 @@ function [data meta] = readStack(fullfname)
             fprintf('\n');
         end
 
-        data(:,:, ZCTidx(1), ZCTidx(2), ZCTidx(3)) = bfGetPlane(r, i);
+        img(:,:, ZCTidx(1), ZCTidx(2), ZCTidx(3)) = bfGetPlane(r, i);
     end
     fprintf('\n');
 
@@ -37,8 +37,8 @@ function [data meta] = readStack(fullfname)
     meta.nChannels = r.getSizeC();
     
     omeMeta = r.getMetadataStore();
-    meta.xres = double(omeMeta.getPixelsPhysicalSizeX(0).value(ome.units.UNITS.MICROM));
-    meta.yres = double(omeMeta.getPixelsPhysicalSizeY(0).value(ome.units.UNITS.MICROM));
+    meta.xres = omeMeta.getPixelsPhysicalSizeX(0); %.value(ome.units.UNITS.MICROM));
+    meta.yres = omeMeta.getPixelsPhysicalSizeY(0); %.value(ome.units.UNITS.MICROM));
 
     r.close();
 end

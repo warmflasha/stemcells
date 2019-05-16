@@ -1,8 +1,8 @@
 clear all; close all;
 
-addpath(genpath('/Users/idse/repos/Warmflash/')); 
+%addpath(genpath('/Users/idse/repos/Warmflash/')); 
 %dataDir = '/Users/idse/data_tmp/161107_NODALcrispr';
-dataDir = '/Volumes/IdseData/170210_ANBMP4withSB/part1';
+dataDir = '.';
 
 nucChannel = 1;
 S4Channel = 0;

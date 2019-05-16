@@ -1,0 +1,62 @@
+clear all; close all;
+
+addpath(genpath('/Users/idseimac/stemcells')); 
+
+%[scriptPath,~,ext] = fileparts(matlab.desktop.editor.getActiveFilename);
+
+dataDir = '/data/170705_Gridse';
+MIPdir = fullfile(dataDir,'MIP');
+meta = MetadataAndor(dataDir);
+
+%% read tracking data
+
+moves = {};
+stats = {};
+tmax = meta.tPerFile;
+labels = zeros([1024 1024 tmax],'uint16');
+
+for ti = 1:tmax
+    
+    fname = sprintf('%0.5d.h5',ti-1);
+    fullfname = fullfile(MIPdir, 'Gridse_MIP_p0000_w0001_H5-Event-Sequence', fname);
+    info = h5info(fullfname,'/tracking');
+
+    %dataSets = [info.Groups.Datasets];
+    if ~isempty(info.Datasets)
+        gotMoves = strmatch('Moves', {info.Datasets.Name});
+    else
+        gotMoves = false;
+    end
+
+    trackID{ti} = h5read(fullfname, '/objects/meta/id');
+    if gotMoves
+        moves{ti} = h5read(fullfname, '/tracking/Moves');
+    end
+    labels(:,:,ti) = h5read(fullfname, '/segmentation/labels');
+    stats{ti} = regionprops(labels(:,:,ti),'Area','Centroid');
+    
+    % progress indicator
+    fprintf('.');
+    if mod(ti,80)==0
+        fprintf('\n');
+    end
+end
+fprintf('\n');
+
+%% chain together the moves
+
+moves{2}
+moves{3}
+%moves{3}(moves{2}(2,:))
+
+%% visualize
+
+figure,
+ti = 2;
+X = cat(1, stats{ti}.Centroid);
+textlabels = strsplit(num2str(1:size(X,1)),' ');
+
+imshow(labels(:,:,ti),[])
+hold on
+text(X(:,1),X(:,2),textlabels,'Color','g');
+hold off

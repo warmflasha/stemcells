@@ -1,4 +1,4 @@
-function processVsi(vsifile,dataDir,varargin)
+function colonies = processVsi(vsifile,dataDir,varargin)
 % Function that takes a vsifile as input and outputs to dataDir.
 % will create a colonies.mat file with the colonies array, a metaData.mat
 % file with variable meta and a directory colonies containing images of
@@ -7,7 +7,7 @@ function processVsi(vsifile,dataDir,varargin)
 %   -channelLabel (default {'DAPI','Cdx2','Sox2','Bra'})
 %   -colRadiiMicron (default [200 500 800 1000]/2 )
 %   -colMargin (default 10)
-%   -DAPI channel - nuclear marker channel. By default looks for DAPI in
+%   -DAPIChannel - nuclear marker channel. By default looks for DAPI in
 %   channel labels
 %   -metaDataFile: can read meta structure from file and skip extracting
 %   from vsi. (Default reads from vsi).
@@ -44,6 +44,8 @@ if ~metadatadone
     meta.channelLabel = {'DAPI','Cdx2','Sox2','Bra'};
     meta.colRadiiMicron = [200 500 800 1000]/2;
     meta.colMargin = 10; % margin outside colony to process, in pixels
+    s = round(20/meta.xres);
+    adjustmentFactor = [];
     
     %override from inputs
     if isfield(in_struct,'channelLabel')
@@ -55,10 +57,15 @@ if ~metadatadone
     if isfield(in_struct,'colMargin')
         meta.colMargin = in_struct.colMargin;
     end
-    
     if isfield(in_struct,'channelNames')
         meta.channelNames = in_struct.channelNames;
         meta.nChannels = length(meta.channelNames);
+    end
+    if isfield(in_struct,'cleanScale')
+        s = round(in_struct.cleanScale/meta.xres);
+    end
+    if isfield(in_struct,'adjustmentFactor')
+        adjustmentFactor = in_struct.adjustmentFactor;
     end
     
     meta.colRadiiPixel = meta.colRadiiMicron/meta.xres;
@@ -76,12 +83,16 @@ if isfield(in_struct,'DAPIChannel')
 else
     DAPIChannel = find(strcmp(meta.channelNames,'DAPI'));
 end
-colDir = fullfile(dataDir,'colonies');
+
+[~,vsinr] = fileparts(vsifile);
+vsinr = vsinr(end-3:end);
+colDir = fullfile(dataDir,['colonies_' vsinr]);
+
 %% processing loop
 
 % masks for radial averages
-[radialMaskStack, edges] = makeRadialBinningMasks(meta);
-
+[radialMaskStack, edges] = makeRadialBinningMasks(...
+            meta.colRadiiPixel, meta.colRadiiMicron, meta.colMargin);
 % split the image up in big chunks for efficiency
 maxBytes = (maxMemoryGB*1024^3);
 bytesPerPixel = 2;
@@ -149,6 +160,8 @@ for n = 1:numel(yedge)-1
                 img(:,:,ci) = img_bf{1}{ci,1};
                 preview(yminprev:ymaxprev,xminprev:xmaxprev, ci) = ...
                     imresize(img(:,:,ci),[ymaxprev-yminprev+1, xmaxprev-xminprev+1]);
+                % rescale lookup for easy preview
+                preview(:,:,ci) = imadjust(mat2gray(preview(:,:,ci)));
                 %            toc
             end
         else
@@ -156,10 +169,11 @@ for n = 1:numel(yedge)-1
                 img(:,:,ci) = imread(vsifile,ci);
                 preview(yminprev:ymaxprev,xminprev:xmaxprev, ci) = ...
                     imresize(img(:,:,ci),[ymaxprev-yminprev+1, xmaxprev-xminprev+1]);
+                % rescale lookup for easy preview
+                preview(:,:,ci) = imadjust(mat2gray(preview(:,:,ci)));
             end
         end
-        
-        
+
         % determine background
         % bg = getBackground(bg, img, L);
         
@@ -167,7 +181,7 @@ for n = 1:numel(yedge)-1
         if m == 1 && n == 1
             
             for ci = DAPIChannel
-                
+
                 imsize = 2048;
                 si = size(img);
                 xx = min(si(1),4*imsize); yy = min(si(2),4*imsize);
@@ -183,21 +197,17 @@ for n = 1:numel(yedge)-1
                 end
                 
                 forIlim = img(x0:xx,y0:yy,ci);
-                minI = double(min(forIlim(:)));
-                maxI = double(max(forIlim(:)));
-                forIlim = mat2gray(forIlim);
-                
-                IlimDAPI = (stretchlim(forIlim)*maxI + minI)';
-                t = 0.8*graythresh(forIlim)*maxI + minI;
+                t = thresholdMP(forIlim, adjustmentFactor);
             end
         end
-        mask(ymin:ymax,xmin:xmax) = img(:,:,DAPIChannel) > 0.8*t;
+        mask(ymin:ymax,xmin:xmax) = img(:,:,DAPIChannel) > t;
         
         disp('find colonies');
         tic
-        s = round(20/meta.xres);
         range = [xmin, xmax, ymin, ymax];
+        
         [chunkColonies{chunkIdx}, cleanmask, welllabel] = findColonies(mask, range, meta, s);
+
         toc
         
         disp('merge colonies')
@@ -225,8 +235,7 @@ for n = 1:numel(yedge)-1
             % store the ID so the colony object knows its position in the
             % array (used to then load the image etc)
             colonies(coli).setID(coli);
-            
-            
+
             %increment well to account for previous
             colonies(coli).well = colonies(coli).well + prevNWells;
             
@@ -234,18 +243,13 @@ for n = 1:numel(yedge)-1
             if mod(coli,60)==0
                 fprintf('\n');
             end
-            
-            colDiamMicron = 2*colonies(coli).radiusMicron;
-            
+
             b = colonies(coli).boundingBox;
             colnucmask = mask(b(3):b(4),b(1):b(2));
-            colcytmask = imdilate(colnucmask,strel('disk',round(5/meta.xres)))-colnucmask;
             
             b(1:2) = b(1:2) - double(xmin - 1);
             b(3:4) = b(3:4) - double(ymin - 1);
             colimg = img(b(3):b(4),b(1):b(2), :);
-            
-            colmaskClean = cleanmask(b(3):b(4),b(1):b(2));
             
             % write colony image
             colonies(coli).saveImage(colimg, colDir);
@@ -253,52 +257,59 @@ for n = 1:numel(yedge)-1
             % write DAPI separately for Ilastik
             colonies(coli).saveImage(colimg, colDir, DAPIChannel);
             
-            % do radial binning
-            colType = find(meta.colRadiiMicron == colonies(coli).radiusMicron);
-            N = size(radialMaskStack{colType},3);
-            nucradavg = zeros([N meta.nChannels]);
-            nucradstd = zeros([N meta.nChannels]);
-            cytradavg = zeros([N meta.nChannels]);
-            cytradstd = zeros([N meta.nChannels]);
+            % subtract background
+            bg = imopen(colimg, strel('disk',15));
+            colimg = colimg - bg;
             
-            % store bin edges, to be reused by segmented profiles later
-            colonies(coli).radialProfile.BinEdges = edges{colType};
+            % make radial average
+            colonies(coli).makeRadialAvgNoSeg(colimg, colnucmask, meta.colMargin)
             
-            for ri = 1:N
-                % for some reason linear indexing is faster than binary
-                colnucbinmask = find(radialMaskStack{colType}(:,:,ri) & colnucmask);
-                colcytbinmask = find(radialMaskStack{colType}(:,:,ri) & colcytmask);
-                
-                for ci = 1:meta.nChannels
-                    imc = colimg(:,:,ci);
-                    % most primitive background subtraction: minimal value
-                    % within the colony
-                    % min(imc(colmaskClean)) doubles the computatation time
-                    imc = imc - min(imc(:));
-                    
-                    imcbin = imc(colnucbinmask);
-                    nucradavg(ri,ci) = mean(imcbin);
-                    nucradstd(ri,ci) = std(double(imcbin));
-                    
-                    imcbin = imc(colcytbinmask);
-                    cytradavg(ri,ci) = mean(imcbin);
-                    cytradstd(ri,ci) = std(double(imcbin));
-                end
-            end
-            colonies(coli).radialProfile.NucAvg = nucradavg;
-            colonies(coli).radialProfile.NucStd = nucradstd;
-            colonies(coli).radialProfile.CytAvg = cytradavg;
-            colonies(coli).radialProfile.CytStd = cytradstd;
+            % calculate moments
+            colonies(coli).calculateMoments(colimg);
         end
         prevNWells = prevNWells+max(max(welllabel));
-        
+
         fprintf('\n');
         toc
         
     end
 end
-preview = uint16(preview);
-imwrite(squeeze(preview(:,:,1)),fullfile(dataDir,'previewDAPI.tif'));
-imwrite(preview(:,:,2:4),fullfile(dataDir,'previewRGB.tif'));
+%preview = uint16(preview);
+if ~exist(fullfile(dataDir,'preview'),'dir')
+	mkdir(fullfile(dataDir,'preview'));
+end
 
-save(fullfile(dataDir,'colonies'), 'colonies');
+% exclude some bad colonies based on moments
+goodcolidx = false([1 numel(colonies)]);
+for coli = 1:numel(colonies)
+	CM = colonies(coli).CM{in_struct.momentChannel};
+    if norm(CM) < in_struct.CMcutoff
+        goodcolidx(coli) = true;
+    end
+end
+colonies = colonies(goodcolidx);
+
+% make overview image of results of this function
+maskPreview = imresize(mask, [size(preview,1) size(preview,2)]);
+cleanmaskPreview = imresize(cleanmask, [size(preview,1) size(preview,2)]);
+maskPreviewRGB = cat(3,maskPreview,cleanmaskPreview,0*maskPreview);
+scale = mean(size(mask)./[size(preview,1) size(preview,2)]);
+
+figure,
+imshow(maskPreviewRGB)
+imwrite(maskPreviewRGB, fullfile(dataDir,'preview',['previewMask_' vsinr '.tif']));
+hold on
+for i = 1:numel(colonies)
+    bbox = colonies(i).boundingBox/scale;
+    rec = [bbox(1), bbox(3), bbox(2)-bbox(1), bbox(4)-bbox(3)];
+    rectangle('Position',rec,'LineWidth',2,'EdgeColor','g')
+    text(bbox(1),bbox(3)-25, ['col ' num2str(colonies(i).ID)],'Color','g','FontSize',15);
+end
+hold off
+saveas(gcf, fullfile(dataDir,'preview',['previewSeg_' vsinr '.tif']));
+close;
+
+imwrite(squeeze(preview(:,:,1)),fullfile(dataDir,'preview',['previewDAPI_' vsinr '.tif']));
+imwrite(preview(:,:,2:4),fullfile(dataDir,'preview',['previewRGB_' vsinr '.tif']));
+
+save(fullfile(dataDir,['colonies_' vsinr]), 'colonies');
