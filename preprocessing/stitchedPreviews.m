@@ -115,7 +115,10 @@ for wellnr = wells
         end
         
         % set lookup table
-        MIPinTime = max(preview,[],3);              
+        MIPinTime = max(preview,[],3);    
+        if max(max(MIPinTime)) == 0
+            continue;
+        end
         Ilim = stretchlim(MIPinTime);
         % scale lim back to 16 bit range
         Imin = double(min(MIPinTime(MIPinTime>0))); 

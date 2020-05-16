@@ -149,7 +149,7 @@ classdef Position < handle
             disp(['loaded image ' fname]);
         end
 
-        function seg = loadSegmentation(this, dataDir, channel, segfileformat)
+        function seg = loadSegmentation(this, dataDir, channel, invertMask)
             % load segmentation
             %
             % seg = loadSegmentation(dataDir, channel)
@@ -169,6 +169,10 @@ classdef Position < handle
 
             if ~exist('channel','var')
                 error('please provide channel');
+            end
+            
+            if ~exist('invertMask','var')
+                invertMask = false;
             end
 
             [~,~,ext] = fileparts(this.filename);
@@ -229,6 +233,7 @@ classdef Position < handle
                 s = strsplit(this.filename,'_[fwptm][0-9]+','DelimiterType','RegularExpression');
                 barefname{3} = sprintf([s{1}  '_MIP_p%.4d'], this.ID-1);
                 
+                barefname{4} = sprintf([s{1} '_MIP_f%.4d'],this.ID-1);
                 % find the first barefname for which there is an h5 file
                 i = 0;
                 listing = [];
@@ -268,6 +273,7 @@ classdef Position < handle
                 
             else
                 seg = h5read(fname, '/exported_data');
+
                 % Probabilities
                 if size(seg,1) > 1 
                     ssegsize = size(seg);
@@ -282,6 +288,9 @@ classdef Position < handle
                 % Ilastik output data has xy transposed
                 seg = permute(seg, [2 1 3]);
                 disp(['loaded segmentation ' fname]);
+                if invertMask
+                    seg = ~seg;
+                end
             end
         end
         
@@ -380,6 +389,7 @@ classdef Position < handle
             % -MIPidxDir            directory of MIPidx files if desired
             % -segmentationDir      directory of segmentation, default
             %                       dataDir
+            % -invertMask           set to true for mask inverstion
             % -------------------------------------------------------------
             % -nuclearSegmentation  binary stack with 3rd dim time for
             %                       providing a segmentation by hand
@@ -423,6 +433,9 @@ classdef Position < handle
             if ~isfield(opts, 'segmentationDir')
                 opts.segmentationDir = dataDir;
             end
+            if ~isfield(opts,'invertMask')
+                opts.invertMask = false;
+            end
             if ~isfield(opts, 'MIPidxDir')
                 opts.MIPidxDir = [];
             end
@@ -441,7 +454,7 @@ classdef Position < handle
             % load all available segmentations
             seg = {};
             for ci = allChannels
-                seg{ci} = this.loadSegmentation(opts.segmentationDir, ci);
+                seg{ci} = this.loadSegmentation(opts.segmentationDir, ci,opts.invertMask);
                 if isfield(opts, 'segFG')
                     seg{ci} = seg{ci} == opts.segFG;
                 end
